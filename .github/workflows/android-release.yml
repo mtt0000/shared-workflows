@@ -1,0 +1,83 @@
+name: Android release
+
+# Reusable workflow for new Android repos: builds the release APK of `module`, signs it with the
+# shared key and publishes it as a GitHub release of the pushed tag. Caller:
+#
+#   on:
+#     push:
+#       tags: ['v*']
+#   permissions:
+#     contents: write
+#   jobs:
+#     release:
+#       uses: mtt0000/shared-workflows/.github/workflows/android-release.yml@main
+#       secrets: inherit
+#
+# The release build type must have no signingConfig of its own (the APK is signed here).
+
+on:
+  workflow_call:
+    inputs:
+      module:
+        type: string
+        default: app
+      java-version:
+        type: string
+        default: '17'
+    secrets:
+      KEYSTORE_BASE64:
+        required: true
+      STORE_PASSWORD:
+        required: true
+      KEY_ALIAS:
+        required: true
+      KEY_PASSWORD:
+        required: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ inputs.java-version }}
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build
+        run: chmod +x gradlew && ./gradlew --no-daemon ":${{ inputs.module }}:assembleRelease"
+
+      - name: Sign
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          MODULE: ${{ inputs.module }}
+        run: |
+          set -euo pipefail
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)
+          mkdir -p dist
+          for apk in "$MODULE"/build/outputs/apk/release/*.apk; do
+            name=$(basename "$apk" .apk); name=${name%-unsigned}
+            "$BT/zipalign" -f -p 4 "$apk" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" sign \
+              --ks "$RUNNER_TEMP/release.jks" \
+              --ks-pass env:STORE_PASSWORD \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass env:KEY_PASSWORD \
+              --out "dist/$name-${GITHUB_REF_NAME}.apk" "$RUNNER_TEMP/aligned.apk"
+            "$BT/apksigner" verify "dist/$name-${GITHUB_REF_NAME}.apk"
+          done
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
