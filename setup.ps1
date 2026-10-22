@@ -12,21 +12,36 @@ function Read-Secret($prompt) {
     [System.Net.NetworkCredential]::new("", (Read-Host $prompt -AsSecureString)).Password
 }
 
-# keytool: dal PATH, altrimenti dal JDK incluso in Android Studio
-$keytool = (Get-Command keytool -ErrorAction SilentlyContinue).Source
-if (-not $keytool) {
-    $keytool = @(
+# keytool: dal PATH, da JAVA_HOME, da Android Studio o da un JDK Temurin installato
+function Find-Keytool {
+    $cmd = (Get-Command keytool -ErrorAction SilentlyContinue).Source
+    if ($cmd) { return $cmd }
+    $candidates = @(
+        "$env:JAVA_HOME\bin\keytool.exe",
         "$env:ProgramFiles\Android\Android Studio\jbr\bin\keytool.exe",
-        "$env:ProgramFiles\Android\Android Studio\jre\bin\keytool.exe"
-    ) | Where-Object { Test-Path $_ } | Select-Object -First 1
+        "$env:ProgramFiles\Android\Android Studio\jre\bin\keytool.exe",
+        "$env:LOCALAPPDATA\Programs\Android Studio\jbr\bin\keytool.exe"
+    )
+    $candidates += Get-ChildItem "$env:ProgramFiles\Eclipse Adoptium\*\bin\keytool.exe", `
+        "$env:ProgramFiles\Java\*\bin\keytool.exe", `
+        "$env:ProgramFiles\Microsoft\jdk-*\bin\keytool.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | ForEach-Object FullName
+    $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 }
+$keytool = Find-Keytool
 
 $PW = Read-Secret "Password del keystore (min 6 caratteri, niente virgolette)"
 
 if (Test-Path $KS) {
     Write-Host "Uso il keystore esistente: $KS"
 } else {
-    if (-not $keytool) { throw "keytool non trovato: installa un JDK o Android Studio." }
+    if (-not $keytool) {
+        Write-Host "keytool non trovato: installo il JDK Temurin 21 con winget..."
+        winget install --id EclipseAdoptium.Temurin.21.JDK -e --silent --accept-package-agreements --accept-source-agreements
+        $keytool = Find-Keytool
+        if (-not $keytool) { throw "keytool ancora non trovato: chiudi e riapri PowerShell, poi rilancia lo script." }
+    }
+    Write-Host "Uso keytool: $keytool"
     New-Item -ItemType Directory -Force (Split-Path $KS) | Out-Null
     & $keytool -genkeypair -keystore $KS -storetype PKCS12 -alias $ALIAS `
         -keyalg RSA -keysize 4096 -validity 10000 `
