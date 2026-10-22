@@ -13,6 +13,7 @@ Una sola chiave di firma per tutte le app Android di mtt0000.
 1. Crea un **fine-grained token**: GitHub → Settings → Developer settings → Fine-grained tokens.
    - Repository access: **All repositories**
    - Permissions → Repository → **Secrets: Read and write**
+   - Permissions → Repository → **Contents: Read-only** (serve per vedere il `gradlew` nei repo privati)
    - Scadenza: la più lunga possibile. Quando scade, la sincronizzazione fallisce in modo visibile qui in Actions.
 2. Da PowerShell, con `gh auth login` già fatto, lancia `setup.ps1`.
 
